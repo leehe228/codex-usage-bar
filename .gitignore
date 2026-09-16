@@ -1,0 +1,15 @@
+.build/
+.work/
+dist/
+.DS_Store
+
+# Local reference snapshot; not a runtime dependency.
+/reference/
+
+# Credentials and local account state must never be committed.
+auth.json
+accounts.json
+.env
+.env.*
+*.log
+*.pem
