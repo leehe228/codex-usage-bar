@@ -105,6 +105,7 @@ public struct ActivitySnapshot: Codable, Sendable, Equatable {
     public var daily: [DailyUsage]?
     public var fetchedAt: Date
 }
+public enum AccountProvider: String, Codable, Sendable { case codex, openmodel }
 public struct SavedAccount: Codable, Sendable, Identifiable, Equatable {
     public var id: UUID
     public var alias: String
@@ -112,8 +113,13 @@ public struct SavedAccount: Codable, Sendable, Identifiable, Equatable {
     public var quota: QuotaSnapshot?
     public var activity: ActivitySnapshot?
     public var monthlyCredits: MonthlyCreditSnapshot?
-    public init(id: UUID, alias: String, identity: AccountIdentity, quota: QuotaSnapshot? = nil, activity: ActivitySnapshot? = nil, monthlyCredits: MonthlyCreditSnapshot? = nil) {
+    public var provider: AccountProvider?
+    public var openModel: OpenModelSnapshot?
+    public var isOpenModel: Bool { provider == .openmodel }
+    public var fetchedAt: Date? { isOpenModel ? openModel?.fetchedAt : quota?.fetchedAt }
+    public init(id: UUID, alias: String, identity: AccountIdentity, quota: QuotaSnapshot? = nil, activity: ActivitySnapshot? = nil, monthlyCredits: MonthlyCreditSnapshot? = nil, provider: AccountProvider? = nil, openModel: OpenModelSnapshot? = nil) {
         self.id = id; self.alias = alias; self.identity = identity; self.quota = quota; self.activity = activity; self.monthlyCredits = monthlyCredits
+        self.provider = provider; self.openModel = openModel
     }
 }
 public struct Preferences: Codable, Sendable {

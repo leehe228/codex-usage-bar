@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Darwin
+import CodexUsageCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
@@ -21,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: UsagePopover(model: model, add: { [weak self] in self?.showLogin() }, settings: { [weak self] in self?.showSettings() }))
+        model.connection.onChanged = { [weak self] in self?.updateItem() }
         model.onStatusChanged = { [weak self] in self?.updateItem() }
         model.onLoginRequested = { [weak self] in self?.showLogin() }
         let center = NSWorkspace.shared.notificationCenter
@@ -29,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateItem(); model.opened()
         if CommandLine.arguments.contains("--show") { togglePopover() }
         if CommandLine.arguments.contains("--settings") { showSettings() }
+        if CommandLine.arguments.contains("--connect-openmodel") { model.startLogin(alias: "openmodel", provider: .openmodel) }
         if CommandLine.arguments.contains("--preview-window") {
             let controller = usageController(maxHeight: (NSScreen.main?.visibleFrame.height ?? 768) - 40)
             previewWindow = window(title: "Codex Usage Bar 미리보기", view: controller.rootView)
@@ -89,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     func showSettings() {
+        model.connection.refresh()
         popover.performClose(nil)
         if settingsWindow == nil {
             settingsWindow = window(title: "Codex Usage Bar 설정", view: SettingsView(model: model, add: { [weak self] in self?.showLogin() }, usage: { [weak self] in self?.settingsWindow?.orderOut(nil); self?.togglePopover() }))
@@ -99,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func showLogin() {
         popover.performClose(nil)
         if loginWindow == nil {
-            loginWindow = window(title: "Codex 계정 연결", view: LoginView(model: model, close: { [weak self] in self?.loginWindow?.close() }))
+            loginWindow = window(title: "계정 연결", view: LoginView(model: model, close: { [weak self] in self?.loginWindow?.close() }))
         }
         NSApp.activate(ignoringOtherApps: true); loginWindow?.makeKeyAndOrderFront(nil)
     }
@@ -152,6 +156,26 @@ private enum MenuBarMeterImage {
 @main enum CodexUsageBarApp {
     @MainActor static func main() {
         umask(0o077)
+        if CommandLine.arguments.contains("--verify-openmodel") {
+            Task.detached {
+                do {
+                    let accounts = try AccountRepository().load().accounts.filter(\.isOpenModel)
+                    guard !accounts.isEmpty else { print("OpenModel 계정이 없습니다."); exit(1) }
+                    for account in accounts {
+                        let client = OpenModelClient(credential: try OpenModelKeychain.load(account.id), persistentID: account.id)
+                        try await client.refreshAuthentication()
+                        let (_, snapshot) = try await client.fetch(expected: account.identity)
+                        let data = try JSONEncoder().encode(snapshot)
+                        print(String(decoding: data, as: UTF8.self))
+                    }
+                    exit(0)
+                } catch {
+                    print((error as? OpenModelError)?.localizedDescription ?? "OpenModel 검증에 실패했습니다.")
+                    exit(1)
+                }
+            }
+            dispatchMain()
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate(); app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }

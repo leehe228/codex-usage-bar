@@ -36,6 +36,14 @@ struct UsagePopover: View {
             Divider()
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
+                    Text("Codex 연결").font(.caption).foregroundStyle(.secondary)
+                    ConnectionButtons(connection: model.connection, cli: model.cli)
+                }
+                if let message = model.connection.message {
+                    Text(message).font(.caption).foregroundStyle(model.connection.failed ? .orange : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 8) {
                     Button(action: add) { Label("계정 추가", systemImage: "plus") }
                         .buttonStyle(FooterButtonStyle(prominent: true))
                         .disabled(model.demo || model.storageUnavailable)
@@ -56,10 +64,14 @@ struct UsagePopover: View {
         if model.accounts.isEmpty {
             ContentUnavailableView("등록된 계정이 없습니다", systemImage: "person.crop.circle.badge.plus", description: Text("ChatGPT 계정을 추가해 Codex 사용량을 확인하세요.")).frame(height: 200)
         } else if let selected = model.selected, let account = model.accounts.first(where: { $0.id == selected }) {
-            AccountDetail(model: model, account: account, reauthenticate: { settings() }).padding(.horizontal, 18)
+            if account.isOpenModel {
+                OpenModelDetail(model: model, account: account, reauthenticate: settings).padding(.horizontal, 18)
+            } else {
+                AccountDetail(model: model, account: account, reauthenticate: { settings() }).padding(.horizontal, 18)
+            }
         } else {
             VStack(spacing: compact ? 6 : 9) {
-                HStack { Text("\(model.accounts.count)개 계정"); Spacer(); Text("사용한 비율을 계정별로 확인") }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 3)
+                HStack { Text("\(model.accounts.count)개 계정"); Spacer(); Text("계정별 사용량과 잔액") }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 3)
                 ForEach(model.accounts) { a in
                     Button { model.selected = a.id } label: { AccountCard(model: model, account: a, compact: compact) }.buttonStyle(.plain)
                 }
@@ -110,12 +122,14 @@ struct AccountCard: View {
         VStack(alignment: .leading, spacing: compact ? 6 : 9) {
             HStack(spacing: 7) {
                 Text(account.alias).font(.subheadline.bold())
-                if model.hasReachedLimit(account) { LimitReachedLabel() }
-                Spacer(); Text(account.identity.plan.capitalized).font(.caption).foregroundStyle(.secondary)
+                if model.hasReachedLimit(account) { LimitReachedLabel(text: account.isOpenModel ? "잔액 부족" : "한도 도달") }
+                Spacer(); Text(account.isOpenModel ? "OpenModel" : account.identity.plan.capitalized).font(.caption).foregroundStyle(.secondary)
                 StateLabel(model: model, account: account)
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
             }
-            if let quota = account.quota {
+            if account.isOpenModel {
+                OpenModelSummary(model: model, account: account)
+            } else if let quota = account.quota {
                 let windows = quota.visibleWindows(preferences: model.disk.preferences)
                 ForEach(Array(windows.prefix(2))) { w in
                     VStack(spacing: compact ? 2 : 4) {
@@ -173,8 +187,9 @@ struct StateLabel: View {
     }
 }
 struct LimitReachedLabel: View {
+    var text = "한도 도달"
     var body: some View {
-        Label("한도 도달", systemImage: "exclamationmark.circle")
+        Label(text, systemImage: "exclamationmark.circle")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(.orange)
             .fixedSize(horizontal: true, vertical: false)
@@ -276,6 +291,7 @@ struct SettingsView: View {
             if model.demo { Text("미리보기 모드에서는 실제 계정과 설정을 변경하지 않습니다.").font(.caption).foregroundStyle(.orange) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    ConnectionSettings(connection: model.connection, cli: model.cli)
                     ForEach(model.accounts) { a in AccountSettingsRow(model: model, account: a) }
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
@@ -283,7 +299,7 @@ struct SettingsView: View {
                         Text("선택한 계정의 주간 남은 비율을 계정 순서대로 세로 막대에 표시합니다. 주간 한도가 없으면 5시간 한도를 사용합니다.")
                             .font(.caption).foregroundStyle(.secondary)
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], alignment: .leading, spacing: 7) {
-                            ForEach(model.accounts) { account in
+                            ForEach(model.meterAccounts) { account in
                                 Toggle(account.alias, isOn: Binding(
                                     get: { model.disk.preferences.showsInMenuBar(account.id) },
                                     set: { model.setMenuBarAccount(account.id, visible: $0) }
@@ -293,10 +309,11 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    Text("OpenModel은 고정 한도가 없는 잔액 방식이므로 메뉴 막대의 비율 막대에서는 제외됩니다.").font(.caption).foregroundStyle(.secondary)
                     Divider()
                     Picker("메뉴 막대 대표 계정", selection: $model.disk.preferences.representative) {
                         Text("선택 안 함").tag(UUID?.none)
-                        ForEach(model.accounts) { Text($0.alias).tag(Optional($0.id)) }
+                        ForEach(model.meterAccounts) { Text($0.alias).tag(Optional($0.id)) }
                     }
                     Picker("자동 갱신", selection: $model.disk.preferences.interval) {
                         Text("수동").tag(0); Text("1분").tag(60); Text("2분").tag(120); Text("5분").tag(300); Text("15분").tag(900)
@@ -316,12 +333,12 @@ struct SettingsView: View {
                         }
                     }
                     Text(model.cli ?? "설치된 Codex CLI를 찾지 못했습니다.").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    Text("계정 인증은 앱 전용 저장소의 파일에 보관되며 Codex CLI가 관리합니다. 기본 Codex 로그인은 교체하지 않습니다.").font(.caption).foregroundStyle(.secondary)
+                    Text("Codex 인증은 CLI가 앱 전용 파일로 관리합니다. OpenModel 로그인 토큰과 갱신 쿠키는 macOS Keychain에 저장합니다.").font(.caption).foregroundStyle(.secondary)
                     Button("앱 저장소 열기") { NSWorkspace.shared.open(model.repository.root) }
                     if let message = model.message { Text(message).font(.caption).foregroundStyle(.orange) }
                 }.padding(.trailing, 5)
             }
-            HStack { Button("사용량 보기", action: usage); Text("v0.1.8 · macOS 14+").font(.caption).foregroundStyle(.secondary); Spacer(); Button("저장") { model.persist() } }
+            HStack { Button("사용량 보기", action: usage); Text("v0.3.0 · macOS 14+").font(.caption).foregroundStyle(.secondary); Spacer(); Button("저장") { model.persist() } }
         }.padding(24).frame(width: 620, height: 620)
         .onChange(of: model.disk.preferences.representative) { model.persist() }
         .onChange(of: model.disk.preferences.interval) { model.persist() }
@@ -345,7 +362,7 @@ struct AccountSettingsRow: View {
             }
             Text(model.disk.preferences.hideEmail ? "이메일 숨김" : account.identity.email ?? "이메일 미제공").font(.caption).foregroundStyle(.secondary)
             HStack {
-                Text("\(account.identity.plan.capitalized) · 연결된 워크스페이스 \(account.identity.workspace.prefix(8))").font(.caption).foregroundStyle(.secondary)
+                Text(account.isOpenModel ? "OpenModel · 계정 로그인 연결" : "\(account.identity.plan.capitalized) · 연결된 워크스페이스 \(account.identity.workspace.prefix(8))").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("↑") { model.move(account.id, offset: -1) }.accessibilityLabel("계정 순서 위로")
                 Button("↓") { model.move(account.id, offset: 1) }.accessibilityLabel("계정 순서 아래로")
@@ -357,21 +374,23 @@ struct AccountSettingsRow: View {
             .alert("\(account.alias) 계정을 제거할까요?", isPresented: $confirmingRemoval) {
                 Button("취소", role: .cancel) {}
                 Button("제거", role: .destructive) { model.remove(account.id) }
-            } message: { Text("이 앱의 해당 계정 인증 파일과 저장된 사용량을 삭제합니다. 기본 Codex 로그인은 유지됩니다.") }
+            } message: { Text("이 앱의 해당 계정 인증 정보와 저장된 사용량을 삭제합니다. 다른 앱의 로그인은 유지됩니다.") }
     }
 }
 struct LoginView: View {
     @Bindable var model: AppModel
     @State private var alias = ""
+    @State private var provider: AccountProvider = .codex
     var close: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Codex 계정 연결").font(.title2.bold())
+            Text("계정 연결").font(.title2.bold())
             Text("앱 전용 계정으로 연결합니다. 브라우저에 로그인된 계정이 다르면 원하는 계정으로 바꿔 로그인하세요.").font(.subheadline).foregroundStyle(.secondary)
             if let identity = model.pendingIdentity {
                 Text(model.pendingAlias).font(.headline)
                 Text(identity.email ?? "이메일 미제공").textSelection(.enabled)
                 Text(identity.plan.capitalized).foregroundStyle(.secondary)
+                if model.loginProvider == .openmodel { Text("잔액·사용량 조회와 인증 갱신을 확인했습니다.").font(.caption).foregroundStyle(.green) }
                 Text("이 계정이 맞는지 확인하세요.").font(.caption)
                 HStack { Button("취소") { model.cancelLogin(); close() }; Spacer(); Button("확인 후 등록") { model.confirmLogin(); if model.pendingIdentity == nil { close() } }.buttonStyle(.borderedProminent) }
             } else if model.loginInProgress {
@@ -380,9 +399,13 @@ struct LoginView: View {
                 if let url = model.loginURL { Button("로그인 페이지 다시 열기") { NSWorkspace.shared.open(url) } }
                 Button("로그인 취소") { model.cancelLogin() }
             } else {
+                Picker("서비스", selection: $provider) {
+                    Text("Codex").tag(AccountProvider.codex)
+                    Text("OpenModel").tag(AccountProvider.openmodel)
+                }.pickerStyle(.segmented)
                 TextField("계정 별칭 (예: 개인, 연구, 업무)", text: $alias).textFieldStyle(.roundedBorder)
-                Text("인증 정보는 접근 권한이 제한된 앱 전용 파일에 저장됩니다.").font(.caption).foregroundStyle(.secondary)
-                HStack { Button("닫기", action: close); Spacer(); Button("ChatGPT로 로그인") { model.message = nil; model.startLogin(alias: alias) }.buttonStyle(.borderedProminent).disabled(alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.storageUnavailable) }
+                Text(provider == .openmodel ? "공식 콘솔에서 로그인합니다. 로그인 토큰과 갱신 쿠키는 Keychain에 저장됩니다." : "인증 정보는 접근 권한이 제한된 앱 전용 파일에 저장됩니다.").font(.caption).foregroundStyle(.secondary)
+                HStack { Button("닫기", action: close); Spacer(); Button(provider == .openmodel ? "OpenModel로 로그인" : "ChatGPT로 로그인") { model.message = nil; model.startLogin(alias: alias, provider: provider) }.buttonStyle(.borderedProminent).disabled(alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.storageUnavailable) }
             }
             if let message = model.message { Text(message).font(.caption).foregroundStyle(.orange) }
         }.padding(26).frame(width: 440).fixedSize(horizontal: false, vertical: true)
