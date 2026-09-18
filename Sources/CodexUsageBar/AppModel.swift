@@ -67,6 +67,9 @@ final class AppModel {
     func canHideMenuBarAccount(_ id: UUID) -> Bool {
         disk.preferences.showsInMenuBar(id) && menuBarAccounts.count > 1
     }
+    func hasReachedLimit(_ account: SavedAccount) -> Bool {
+        account.quota?.reached == true
+    }
     var statusTitle: String {
         guard let a = accounts.first(where: { $0.id == disk.preferences.representative }), let quota = a.quota else { return "" }
         let primary = quota.windows.first { $0.bucket == "codex" && $0.kind == "primary" }
@@ -85,7 +88,6 @@ final class AppModel {
         if errors[account.id] != nil { return "조회 실패 · 이전 값" }
         guard let quota = account.quota else { return "확인 필요" }
         if quota.windows.contains(where: { ($0.reset ?? .distantFuture) <= now }) { return "리셋 확인 중" }
-        if quota.reached { return "한도 도달" }
         if now.timeIntervalSince(quota.fetchedAt) > Double(max(600, disk.preferences.interval * 2)) { return "오래된 값" }
         return "정상 조회"
     }

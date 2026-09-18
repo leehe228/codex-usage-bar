@@ -108,8 +108,9 @@ struct AccountCard: View {
     var compact = false
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 9) {
-            HStack {
+            HStack(spacing: 7) {
                 Text(account.alias).font(.subheadline.bold())
+                if model.hasReachedLimit(account) { LimitReachedLabel() }
                 Spacer(); Text(account.identity.plan.capitalized).font(.caption).foregroundStyle(.secondary)
                 StateLabel(model: model, account: account)
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
@@ -157,8 +158,26 @@ struct StateLabel: View {
     var account: SavedAccount
     var body: some View {
         let status = model.status(account)
-        Label(status, systemImage: status == "정상 조회" ? "checkmark.circle.fill" : status == "조회 중" ? "arrow.clockwise" : "exclamationmark.circle.fill")
-            .font(.system(size: 10)).foregroundStyle(status == "정상 조회" ? .green : model.authRequired.contains(account.id) ? .red : .orange)
+        if status == "정상 조회" {
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
+                .help(status).accessibilityLabel(status)
+        } else if status == "조회 중" {
+            ProgressView().controlSize(.mini).tint(.blue)
+                .help(status).accessibilityLabel(status)
+        } else {
+            Label(status, systemImage: "exclamationmark.circle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(model.authRequired.contains(account.id) ? .red : .orange)
+        }
+    }
+}
+struct LimitReachedLabel: View {
+    var body: some View {
+        Label("한도 도달", systemImage: "exclamationmark.circle")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
 struct UsageTrack: View {
@@ -192,9 +211,14 @@ struct AccountDetail: View {
     var reauthenticate: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack { Text(account.alias).font(.title3.bold()); Spacer(); Text(account.identity.plan.capitalized).font(.caption).foregroundStyle(.secondary) }
+            HStack(spacing: 8) {
+                Text(account.alias).font(.title3.bold())
+                if model.hasReachedLimit(account) { LimitReachedLabel() }
+                Spacer()
+                Text(account.identity.plan.capitalized).font(.caption).foregroundStyle(.secondary)
+                StateLabel(model: model, account: account)
+            }
             Text(model.disk.preferences.hideEmail ? "이메일 숨김" : account.identity.email ?? "이메일 미제공").font(.caption).foregroundStyle(.secondary)
-            StateLabel(model: model, account: account)
             if let error = model.errors[account.id] {
                 Text(error).font(.caption).foregroundStyle(.orange)
                 if model.authRequired.contains(account.id) { Button("계정 관리에서 재인증", action: reauthenticate).controlSize(.small) }
@@ -297,7 +321,7 @@ struct SettingsView: View {
                     if let message = model.message { Text(message).font(.caption).foregroundStyle(.orange) }
                 }.padding(.trailing, 5)
             }
-            HStack { Button("사용량 보기", action: usage); Text("v0.1.7 · macOS 14+").font(.caption).foregroundStyle(.secondary); Spacer(); Button("저장") { model.persist() } }
+            HStack { Button("사용량 보기", action: usage); Text("v0.1.8 · macOS 14+").font(.caption).foregroundStyle(.secondary); Spacer(); Button("저장") { model.persist() } }
         }.padding(24).frame(width: 620, height: 620)
         .onChange(of: model.disk.preferences.representative) { model.persist() }
         .onChange(of: model.disk.preferences.interval) { model.persist() }
