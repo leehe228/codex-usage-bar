@@ -12,10 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var previewWindow: NSWindow?
     var notificationTokens: [NSObjectProtocol] = []
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(CommandLine.arguments.contains("--preview-window") ? .regular : .accessory)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Codex Usage Bar")
+            button.image = MenuBarMeterImage.make(fractions: [])
             button.imagePosition = .imageLeading
             button.target = self; button.action = #selector(togglePopover)
         }
@@ -37,10 +37,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     func updateItem() {
-        item.button?.image = NSImage(systemSymbolName: model.errors.isEmpty ? "chart.bar.fill" : "exclamationmark.triangle.fill", accessibilityDescription: "Codex Usage Bar")
+        let shown = model.menuBarAccounts
+        item.button?.image = MenuBarMeterImage.make(fractions: shown.map(model.menuBarRemainingFraction))
         item.button?.title = model.disk.preferences.showMenuNumbers && !model.statusTitle.isEmpty ? " " + model.statusTitle : ""
-        item.button?.toolTip = "Codex Usage Bar · " + model.statusTitle
-        item.button?.setAccessibilityLabel("Codex 사용량 " + model.statusTitle + (model.errors.isEmpty ? "" : " · 계정 조회 오류 있음"))
+        let meters = shown.map { account in
+            let remaining = model.menuBarRemainingFraction(account).map { "\(Int(($0 * 100).rounded()))% 남음" } ?? "사용량 미확인"
+            return "\(account.alias) \(remaining)"
+        }.joined(separator: " · ")
+        item.button?.toolTip = meters.isEmpty ? "Codex Usage Bar" : meters
+        item.button?.setAccessibilityLabel("Codex 사용량 " + meters + (model.errors.isEmpty ? "" : " · 계정 조회 오류 있음"))
         if popover.isShown { resizePopover() }
         if let window = previewWindow, window.isVisible,
            let hosting = window.contentViewController as? NSHostingController<UsagePopover> {
@@ -110,6 +115,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         model.shutdown()
         for token in notificationTokens { NSWorkspace.shared.notificationCenter.removeObserver(token) }
+    }
+}
+
+private enum MenuBarMeterImage {
+    static func make(fractions: [Double?]) -> NSImage {
+        guard !fractions.isEmpty else {
+            return NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Codex Usage Bar") ?? NSImage(size: NSSize(width: 18, height: 18))
+        }
+        let barWidth: CGFloat = 4.5
+        let spacing: CGFloat = 2.5
+        let meterHeight: CGFloat = 15
+        let imageHeight: CGFloat = 18
+        let width = CGFloat(fractions.count) * barWidth + CGFloat(max(0, fractions.count - 1)) * spacing
+        let image = NSImage(size: NSSize(width: width, height: imageHeight), flipped: false) { _ in
+            for (index, rawFraction) in fractions.enumerated() {
+                let x = CGFloat(index) * (barWidth + spacing)
+                let trackRect = NSRect(x: x, y: 1.5, width: barWidth, height: meterHeight)
+                NSColor.black.withAlphaComponent(0.18).setFill()
+                NSBezierPath(roundedRect: trackRect, xRadius: 1.25, yRadius: 1.25).fill()
+                guard let rawFraction else { continue }
+                let fraction = min(1, max(0, rawFraction))
+                let fillHeight = max(fraction > 0 ? 1.5 : 0, meterHeight * fraction)
+                guard fillHeight > 0 else { continue }
+                let fillRect = NSRect(x: x, y: 1.5, width: barWidth, height: fillHeight)
+                NSColor.black.setFill()
+                NSBezierPath(roundedRect: fillRect, xRadius: 1.25, yRadius: 1.25).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "계정별 Codex 남은 사용량"
+        return image
     }
 }
 @main enum CodexUsageBarApp {

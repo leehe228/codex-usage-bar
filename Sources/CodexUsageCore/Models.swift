@@ -84,6 +84,12 @@ public struct QuotaSnapshot: Codable, Sendable, Equatable {
     public func visibleWindows(preferences: Preferences) -> [QuotaWindow] {
         windows.filter { !$0.isReserveQuota && (preferences.showCodexSpark || !$0.isCodexSpark) }
     }
+    public var menuBarRemainingPercent: Double? {
+        let weekly = windows.first { $0.bucket == "codex" && ($0.minutes == 10080 || $0.kind == "secondary") }
+        let short = windows.first { $0.bucket == "codex" && ($0.minutes == 300 || $0.kind == "primary") }
+        guard let used = weekly?.used ?? short?.used else { return nil }
+        return min(100, max(0, 100 - used))
+    }
     public init(windows: [QuotaWindow], reached: Bool = false, credits: String? = nil, resetCreditCount: Int? = nil, fetchedAt: Date = .now) {
         self.windows = windows; self.reached = reached; self.credits = credits
         self.resetCreditCount = resetCreditCount; self.fetchedAt = fetchedAt
@@ -117,19 +123,31 @@ public struct Preferences: Codable, Sendable {
     public var remaining = false
     public var hideEmail = false
     public var representative: UUID?
+    public var menuBarAccountIDs: [UUID]?
     public var cliPath = ""
     public init() {}
-    private enum CodingKeys: String, CodingKey { case interval, remaining, hideEmail, representative, cliPath, showMenuNumbers, showCodexSpark }
+    private enum CodingKeys: String, CodingKey { case interval, remaining, hideEmail, representative, menuBarAccountIDs, cliPath, showMenuNumbers, showCodexSpark }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         interval = try c.decodeIfPresent(Int.self, forKey: .interval) ?? 300
         remaining = try c.decodeIfPresent(Bool.self, forKey: .remaining) ?? false
         hideEmail = try c.decodeIfPresent(Bool.self, forKey: .hideEmail) ?? false
         representative = try c.decodeIfPresent(UUID.self, forKey: .representative)
+        menuBarAccountIDs = try c.decodeIfPresent([UUID].self, forKey: .menuBarAccountIDs)
         cliPath = try c.decodeIfPresent(String.self, forKey: .cliPath) ?? ""
         showMenuNumbers = try c.decodeIfPresent(Bool.self, forKey: .showMenuNumbers) ?? false
         showCodexSpark = try c.decodeIfPresent(Bool.self, forKey: .showCodexSpark) ?? false
         if ![0, 60, 120, 300, 900].contains(interval) { interval = 300 }
+    }
+    public func showsInMenuBar(_ id: UUID) -> Bool {
+        menuBarAccountIDs?.contains(id) ?? true
+    }
+    public mutating func setMenuBarAccount(_ id: UUID, visible: Bool, allAccountIDs: [UUID]) {
+        var selected = Set(menuBarAccountIDs ?? allAccountIDs)
+        if visible { selected.insert(id) }
+        else if selected.count > 1 { selected.remove(id) }
+        let ordered = allAccountIDs.filter { selected.contains($0) }
+        menuBarAccountIDs = ordered.count == allAccountIDs.count ? nil : ordered
     }
 }
 public struct DiskState: Codable, Sendable {

@@ -66,8 +66,31 @@ struct CoreTests {
     @Test func testMissingPreferenceDefaultsAndInvalidInterval() throws {
         let defaults = try JSONDecoder().decode(Preferences.self, from: Data("{}".utf8))
         expectEqual(defaults.interval, 300); expectFalse(defaults.showMenuNumbers)
+        expectNil(defaults.menuBarAccountIDs)
         let invalid = try JSONDecoder().decode(Preferences.self, from: Data(#"{"interval":-100}"#.utf8))
         expectEqual(invalid.interval, 300)
+    }
+    @Test func testMenuBarSelectionAndRemainingUsage() throws {
+        let a = UUID(), b = UUID(), c = UUID()
+        var preferences = Preferences()
+        expectTrue(preferences.showsInMenuBar(a)); expectTrue(preferences.showsInMenuBar(b))
+        preferences.setMenuBarAccount(b, visible: false, allAccountIDs: [a, b, c])
+        expectEqual(preferences.menuBarAccountIDs, [a, c])
+        preferences.setMenuBarAccount(c, visible: false, allAccountIDs: [a, b, c])
+        expectEqual(preferences.menuBarAccountIDs, [a])
+        preferences.setMenuBarAccount(a, visible: false, allAccountIDs: [a, b, c])
+        expectEqual(preferences.menuBarAccountIDs, [a])
+        preferences.setMenuBarAccount(b, visible: true, allAccountIDs: [a, b, c])
+        preferences.setMenuBarAccount(c, visible: true, allAccountIDs: [a, b, c])
+        expectNil(preferences.menuBarAccountIDs)
+
+        let quota = QuotaSnapshot(windows: [
+            QuotaWindow(bucket: "codex", kind: "primary", used: 20, minutes: 300, reset: nil),
+            QuotaWindow(bucket: "codex", kind: "secondary", used: 65, minutes: 10080, reset: nil)
+        ])
+        expectEqual(quota.menuBarRemainingPercent, 35)
+        let shortOnly = QuotaSnapshot(windows: [QuotaWindow(bucket: "codex", kind: "primary", used: 20, minutes: 300, reset: nil)])
+        expectEqual(shortOnly.menuBarRemainingPercent, 80)
     }
     @Test func testBucketsNullAndRealDurations() throws {
         let data = Data(#"{"rateLimits":{"primary":{"usedPercent":99}},"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":0,"windowDurationMins":300,"resetsAt":2000000000},"secondary":{"usedPercent":100,"windowDurationMins":10080,"resetsAt":null}},"new":{"primary":{"usedPercent":42,"windowDurationMins":15}},"broken":{"primary":{"usedPercent":"bad"}}},"rateLimitResetCredits":{"availableCount":0}}"#.utf8)

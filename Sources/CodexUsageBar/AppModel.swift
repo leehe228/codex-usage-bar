@@ -53,6 +53,20 @@ final class AppModel {
     }
     var cli: String? { CLILocator.resolve(custom: disk.preferences.cliPath) }
     var accounts: [SavedAccount] { disk.accounts }
+    var menuBarAccounts: [SavedAccount] {
+        let selected = accounts.filter { disk.preferences.showsInMenuBar($0.id) }
+        return selected.isEmpty ? Array(accounts.prefix(1)) : selected
+    }
+    func menuBarRemainingFraction(_ account: SavedAccount) -> Double? {
+        account.quota?.menuBarRemainingPercent.map { $0 / 100 }
+    }
+    func setMenuBarAccount(_ id: UUID, visible: Bool) {
+        disk.preferences.setMenuBarAccount(id, visible: visible, allAccountIDs: accounts.map(\.id))
+        persist()
+    }
+    func canHideMenuBarAccount(_ id: UUID) -> Bool {
+        disk.preferences.showsInMenuBar(id) && menuBarAccounts.count > 1
+    }
     var statusTitle: String {
         guard let a = accounts.first(where: { $0.id == disk.preferences.representative }), let quota = a.quota else { return "" }
         let primary = quota.windows.first { $0.bucket == "codex" && $0.kind == "primary" }
@@ -215,6 +229,11 @@ final class AppModel {
         let old = reauthTarget
         if let old, let index = newDisk.accounts.firstIndex(where: { $0.id == old }) { newDisk.accounts[index] = saved }
         else { newDisk.accounts.append(saved) }
+        if let old, var ids = newDisk.preferences.menuBarAccountIDs,
+           let index = ids.firstIndex(of: old) {
+            ids[index] = id
+            newDisk.preferences.menuBarAccountIDs = ids
+        }
         if newDisk.preferences.representative == old || newDisk.preferences.representative == nil { newDisk.preferences.representative = id }
         do { try repository.save(newDisk) } catch { message = "계정 등록을 저장하지 못했습니다."; return }
         disk = newDisk; pendingID = nil; pendingIdentity = nil; loginTask = nil; reauthTarget = nil; loginURL = nil
@@ -249,6 +268,10 @@ final class AppModel {
         do {
             try repository.removeHome(id)
             disk.accounts.removeAll { $0.id == id }
+            if var ids = disk.preferences.menuBarAccountIDs {
+                ids.removeAll { $0 == id }
+                disk.preferences.menuBarAccountIDs = ids.isEmpty ? nil : ids
+            }
             if selected == id { selected = nil }
             if disk.preferences.representative == id { disk.preferences.representative = disk.accounts.first?.id }
             persist(); pump()

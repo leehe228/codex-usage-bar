@@ -254,6 +254,22 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(model.accounts) { a in AccountSettingsRow(model: model, account: a) }
                     Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("메뉴 막대 표시 계정").font(.headline)
+                        Text("선택한 계정의 주간 남은 비율을 계정 순서대로 세로 막대에 표시합니다. 주간 한도가 없으면 5시간 한도를 사용합니다.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)], alignment: .leading, spacing: 7) {
+                            ForEach(model.accounts) { account in
+                                Toggle(account.alias, isOn: Binding(
+                                    get: { model.disk.preferences.showsInMenuBar(account.id) },
+                                    set: { model.setMenuBarAccount(account.id, visible: $0) }
+                                ))
+                                .toggleStyle(.checkbox)
+                                .disabled(model.disk.preferences.showsInMenuBar(account.id) && !model.canHideMenuBarAccount(account.id))
+                            }
+                        }
+                    }
+                    Divider()
                     Picker("메뉴 막대 대표 계정", selection: $model.disk.preferences.representative) {
                         Text("선택 안 함").tag(UUID?.none)
                         ForEach(model.accounts) { Text($0.alias).tag(Optional($0.id)) }
@@ -281,8 +297,8 @@ struct SettingsView: View {
                     if let message = model.message { Text(message).font(.caption).foregroundStyle(.orange) }
                 }.padding(.trailing, 5)
             }
-            HStack { Button("사용량 보기", action: usage); Text("v0.1.6 · macOS 14+").font(.caption).foregroundStyle(.secondary); Spacer(); Button("저장") { model.persist() } }
-        }.padding(24).frame(width: 620, height: 570)
+            HStack { Button("사용량 보기", action: usage); Text("v0.1.7 · macOS 14+").font(.caption).foregroundStyle(.secondary); Spacer(); Button("저장") { model.persist() } }
+        }.padding(24).frame(width: 620, height: 620)
         .onChange(of: model.disk.preferences.representative) { model.persist() }
         .onChange(of: model.disk.preferences.interval) { model.persist() }
         .onChange(of: model.disk.preferences.showMenuNumbers) { model.persist() }
